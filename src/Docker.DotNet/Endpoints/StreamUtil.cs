@@ -4,6 +4,8 @@ using System.Net.Http;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Docker.DotNet.Models
 {
@@ -36,24 +38,25 @@ namespace Docker.DotNet.Models
                 using (cancel.Register(() => stream.Dispose()))
                 {
                     using (var reader = new StreamReader(stream, new UTF8Encoding(false)))
-                    {
-                        string line;
-                        try
+                        using (var jsonReader = new JsonTextReader(reader) { SupportMultipleContent = true })
                         {
-                            while ((line = await reader.ReadLineAsync()) != null)
+                            try
                             {
-                                var prog = client.JsonSerializer.DeserializeObject<T>(line);
-                                if (prog == null) continue;
-
-                                progress.Report(prog);
+                                while (await jsonReader.ReadAsync(cancel))
+                                {
+                                    var jObject = await JObject.LoadAsync(jsonReader, cancel);
+                                    var prog    = jObject.ToObject<T>();
+                                    if (prog == null)
+                                        continue;
+                                    progress.Report(prog);
+                                }
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                                // The subsequent call to reader.ReadLineAsync() after cancellation
+                                // will fail because we disposed the stream. Just ignore here.
                             }
                         }
-                        catch (ObjectDisposedException)
-                        {
-                            // The subsequent call to reader.ReadLineAsync() after cancellation
-                            // will fail because we disposed the stream. Just ignore here.
-                        }
-                    }
                 }
             }
         }
